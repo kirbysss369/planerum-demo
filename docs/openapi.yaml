@@ -1,0 +1,228 @@
+openapi: 3.1.0
+info:
+  title: Планерум API
+  version: 0.1.0
+  description: Контракт сервиса подготовки образовательных программ. Содержимое программы требует проверки методистом.
+servers:
+  - url: http://127.0.0.1:8080
+paths:
+  /healthz:
+    get:
+      summary: Проверка доступности процесса
+      responses:
+        '200':
+          description: Текст ok
+          content:
+            text/plain:
+              schema:
+                type: string
+  /v1/agent:
+    post:
+      summary: Единый вход агента
+      security:
+        - serviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentRequest'
+      responses:
+        '200':
+          description: Результат синхронного действия или статус задания
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '202':
+          description: Задание поставлено в очередь (generate_async)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '400':
+          description: Некорректный запрос
+        '401':
+          description: Отсутствует или неверен токен
+        '404':
+          description: Программа или задание не найдено
+        '409':
+          description: Устаревшая revision
+        '422':
+          description: Действие недопустимо в текущем состоянии
+  /v1/references:
+    post:
+      summary: Извлечь текст референса
+      security:
+        - serviceToken: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: DOCX, PDF или TXT до 10 МиБ
+      responses:
+        '200':
+          description: Текст и происхождение файла
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReferenceExtract'
+        '400':
+          description: Неподдерживаемый или ошибочный файл
+        '401':
+          description: Отсутствует или неверен токен
+  /artifacts/{programID}/{revision}/{filename}:
+    get:
+      summary: Скачать артефакт версии
+      security:
+        - serviceToken: []
+      parameters:
+        - in: path
+          name: programID
+          required: true
+          schema: {type: string}
+        - in: path
+          name: revision
+          required: true
+          schema: {type: string, pattern: '^revision-[0-9]+$'}
+        - in: path
+          name: filename
+          required: true
+          schema:
+            type: string
+            enum: [program.json, program.docx, lectures.pptx, tests.xml, validation-report.json]
+      responses:
+        '200':
+          description: Содержимое файла
+        '401':
+          description: Отсутствует или неверен токен
+        '404':
+          description: Файл не найден
+components:
+  securitySchemes:
+    serviceToken:
+      type: http
+      scheme: bearer
+  schemas:
+    AgentRequest:
+      type: object
+      required: [action]
+      additionalProperties: false
+      properties:
+        action:
+          type: string
+          enum: [create, answer, status, approve_outline, generate, generate_async, job_status, revise, export]
+        program_id: {type: string}
+        job_id: {type: string}
+        revision: {type: integer, minimum: 0}
+        spec:
+          $ref: '#/components/schemas/ProgramSpec'
+        program:
+          $ref: '#/components/schemas/Program'
+    AgentResponse:
+      type: object
+      properties:
+        program:
+          $ref: '#/components/schemas/Program'
+        job:
+          $ref: '#/components/schemas/GenerationJob'
+        questions:
+          type: array
+          maxItems: 5
+          items: {type: string}
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/Issue'
+        artifacts:
+          type: object
+          additionalProperties: {type: string}
+        error: {type: string}
+    ProgramSpec:
+      type: object
+      description: Может быть неполным при create/answer; тогда сервис возвращает вопросы.
+      properties:
+        title: {type: string}
+        kind: {type: string, enum: [qualification, general]}
+        audience: {type: string}
+        entry_level: {type: string}
+        delivery: {type: string}
+        requested: {type: number, minimum: 16, maximum: 500}
+        independent_internship: {type: boolean}
+        attestation: {type: string}
+        requirements: {type: string}
+    Program:
+      type: object
+      description: Полный объект совпадает с типом Program в program.go.
+      required: [id, revision, outline_revision, approved_revision, state, spec, goal, outcomes, modules, final_attestation_hours, usage]
+      properties:
+        id: {type: string}
+        revision: {type: integer}
+        outline_revision: {type: integer}
+        approved_revision: {type: integer}
+        generated_from_revision:
+          type: integer
+          description: Версия, на основе которой успешно сохранён последний результат генерации. Используется для восстановления состояния задания после сбоя.
+        state: {type: string, enum: [draft, outline_ready, approved, ready]}
+        spec:
+          $ref: '#/components/schemas/ProgramSpec'
+        goal: {type: string}
+        outcomes:
+          type: array
+          items: {type: object}
+        modules:
+          type: array
+          items: {type: object}
+        final_attestation_hours: {type: number}
+        assessments:
+          type: array
+          items: {type: object}
+        lectures:
+          type: array
+          items: {type: object}
+        sources:
+          type: array
+          items: {type: object}
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/Issue'
+        usage:
+          type: object
+          properties:
+            prompt_tokens: {type: integer}
+            completion_tokens: {type: integer}
+    GenerationJob:
+      type: object
+      required: [id, program_id, expected_revision, state, attempts, updated_at]
+      properties:
+        id: {type: string}
+        program_id: {type: string}
+        expected_revision: {type: integer}
+        result_revision: {type: integer}
+        state: {type: string, enum: [queued, running, done, failed]}
+        attempts: {type: integer}
+        error: {type: string}
+        updated_at: {type: string, format: date-time}
+    ReferenceExtract:
+      type: object
+      required: [name, sha256, bytes, text]
+      properties:
+        name: {type: string}
+        sha256: {type: string}
+        bytes: {type: integer}
+        text: {type: string}
+    Issue:
+      type: object
+      required: [severity, path, message]
+      properties:
+        severity: {type: string, enum: [error, warning]}
+        path: {type: string}
+        message: {type: string}

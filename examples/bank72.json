@@ -1,0 +1,13 @@
+{
+  "action": "create",
+  "spec": {
+    "title": "Анализ данных на Python",
+    "kind": "qualification",
+    "audience": "Сотрудники региональных отделений банков",
+    "entry_level": "Работа в Excel, без опыта Python",
+    "delivery": "Очно-заочная",
+    "requested": 72,
+    "attestation": "Защита проекта на обезличенных банковских данных",
+    "requirements": "Срок — 4 недели. Основы Python перед pandas. Темы: pandas, визуализация, SQL и основы статистики. Слайды для модуля pandas."
+  }
+}

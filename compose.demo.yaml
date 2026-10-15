@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    environment:
+      DEMO_MODE: "1"
+      HOST: "0.0.0.0"
+      ARTIFACT_ROOT: /app/data/artifacts
+    volumes:
+      - demo_artifacts:/app/data/artifacts
+    ports:
+      - "127.0.0.1:8080:8080"
+volumes:
+  demo_artifacts:
