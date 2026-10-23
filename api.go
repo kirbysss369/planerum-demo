@@ -1,8 +1,6 @@
 package hours
 
 import (
-	"encoding/json"
-	"io"
 	"net/http"
 )
 
@@ -19,21 +17,9 @@ type validationResponse struct {
 }
 
 func validateHours(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-
 	var distribution *Distribution
-	if err := decoder.Decode(&distribution); err != nil {
+	if err := decodeRequest(w, r, 64<<10, &distribution); err != nil || distribution == nil {
 		writeValidation(w, http.StatusBadRequest, validationResponse{Error: "invalid JSON distribution"})
-		return
-	}
-	if distribution == nil {
-		writeValidation(w, http.StatusBadRequest, validationResponse{Error: "expected a JSON distribution object"})
-		return
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		writeValidation(w, http.StatusBadRequest, validationResponse{Error: "expected one JSON distribution"})
 		return
 	}
 	if err := distribution.Validate(); err != nil {
@@ -44,7 +30,5 @@ func validateHours(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeValidation(w http.ResponseWriter, status int, response validationResponse) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(response)
+	writeJSON(w, status, response)
 }

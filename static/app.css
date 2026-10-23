@@ -7,9 +7,13 @@
 .gc-scope h2{font-size:18px;line-height:1.3;font-weight:600;margin-bottom:14px}
 .gc-scope h3{font-size:16px;font-weight:600;margin-bottom:10px}
 .gc-scope .topbar p{margin:0;color:var(--color-text-secondary)}
+.gc-scope .demo-warning{max-width:1600px;margin:0 auto 16px;padding:11px 15px;border:1px solid var(--color-status-accent);border-radius:10px;background:var(--color-bg-card-lavender)}
 .gc-scope[data-embed="true"]{padding:12px;background:var(--color-bg-page)}
 .gc-scope[data-embed="true"] .topbar{margin-bottom:12px}
 .gc-scope .workspace{max-width:1600px;margin:auto;display:grid;grid-template-columns:minmax(260px,300px) minmax(450px,1fr) minmax(260px,300px);gap:16px;align-items:start}
+.gc-scope .parameters{grid-column:1;grid-row:1}
+.gc-scope .canvas{grid-column:2;grid-row:1}
+.gc-scope .review{grid-column:3;grid-row:1}
 .gc-scope .panel{min-width:0;background:var(--color-bg-card);border:1px solid var(--color-border-subtle);border-radius:16px;padding:20px}
 .gc-scope .muted{color:var(--color-text-secondary)}
 .gc-scope .parameters label,.gc-scope .review label{display:block;margin:14px 0 5px;font-weight:600}
@@ -28,6 +32,25 @@
 .gc-scope button:disabled{background:var(--color-action-primary-disabled);border-color:transparent;color:var(--color-text-secondary);cursor:not-allowed}
 .gc-scope .wide{width:100%}
 .gc-scope .canvas-head{display:flex;align-items:start;justify-content:space-between;gap:12px;border-bottom:1px solid var(--color-border-subtle);padding-bottom:14px;margin-bottom:14px}
+.gc-scope .request-head{display:flex;align-items:start;justify-content:space-between;gap:16px}
+.gc-scope .request-head h2{margin-bottom:3px}
+.gc-scope .request-head p{margin-bottom:0}
+.gc-scope .request-head button{flex:none;margin:0}
+.gc-scope #message{min-height:125px}
+.gc-scope .send-row{display:flex;align-items:center;justify-content:flex-end;gap:14px;margin:4px 0 24px}
+.gc-scope .send-row small{color:var(--color-text-secondary)}
+.gc-scope .send-row button{margin:0}
+.gc-scope .dialogue{margin-bottom:22px}
+.gc-scope .dialogue-entry{padding:11px 14px;margin:9px 0;border-radius:12px;background:var(--color-bg-glass);white-space:pre-wrap;overflow-wrap:anywhere}
+.gc-scope .dialogue-entry.user{margin-left:8%;background:var(--color-bg-card-lavender)}
+.gc-scope .dialogue-entry strong{display:block;margin-bottom:3px}
+.gc-scope .dialogue-entry p{margin:0}
+.gc-scope .parameters details{margin-top:15px;padding-top:12px}
+.gc-scope .parameters details summary{font-weight:600;color:var(--color-text-primary)}
+.gc-scope .draft-warning{font-size:12px;margin-top:8px}
+.gc-scope .spec-list{display:grid;grid-template-columns:minmax(125px,170px) 1fr;gap:8px 14px;margin:0;overflow-wrap:anywhere}
+.gc-scope .spec-list dt{color:var(--color-text-secondary)}
+.gc-scope .spec-list dd{margin:0;white-space:pre-wrap}
 .gc-scope .canvas-head h2{font-size:23px;margin:0}
 .gc-scope .eyebrow{color:var(--color-text-secondary);font-size:12px;margin-bottom:6px}
 .gc-scope .pill{flex:none;border-radius:9999px;border:1px solid var(--color-border-default);padding:5px 9px;color:var(--color-text-secondary);font-size:12px}
@@ -67,5 +90,5 @@
 .gc-scope summary{cursor:pointer;color:var(--color-text-secondary)}
 .gc-scope pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto;background:var(--color-bg-glass);padding:12px;border-radius:8px;font:12px/1.4 var(--font-mono)}
 .gc-scope .error{color:var(--color-status-error)}
-@media(max-width:1100px){.gc-scope .workspace{grid-template-columns:minmax(260px,320px) minmax(400px,1fr)}.gc-scope .review{grid-column:2}}
-@media(max-width:740px){.gc-scope{padding:12px}.gc-scope .workspace{display:block}.gc-scope .panel{margin-bottom:12px;padding:16px}.gc-scope .topbar{gap:12px}.gc-scope .topbar img{width:100px}.gc-scope .canvas-head h2{font-size:20px}}
+@media(max-width:1100px){.gc-scope .workspace{grid-template-columns:minmax(260px,320px) minmax(400px,1fr)}.gc-scope .review{grid-column:2;grid-row:2}}
+@media(max-width:740px){.gc-scope{padding:12px}.gc-scope .workspace{display:block}.gc-scope .panel{margin-bottom:12px;padding:16px}.gc-scope .topbar{gap:12px}.gc-scope .topbar img{width:100px}.gc-scope .canvas-head h2{font-size:20px}.gc-scope .request-head{flex-wrap:wrap}.gc-scope .request-head button{margin-bottom:8px}}

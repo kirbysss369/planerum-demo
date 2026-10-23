@@ -109,6 +109,9 @@ func RunGenerationWorker(ctx context.Context, queue JobQueue, service Service) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		job, err := queue.Claim(ctx)
 		if err == nil {
 			workCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
@@ -120,7 +123,11 @@ func RunGenerationWorker(ctx context.Context, queue JobQueue, service Service) {
 					p, workErr = latest, nil
 				}
 			}
-			if finishErr := queue.Finish(ctx, job.ID, p.Revision, workErr); finishErr != nil {
+			// Persist the terminal result even when shutdown canceled the work.
+			finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			finishErr := queue.Finish(finishCtx, job.ID, p.Revision, workErr)
+			finishCancel()
+			if finishErr != nil {
 				log.Printf("generation job %s: failed to persist result: %v", job.ID, finishErr)
 			}
 			continue

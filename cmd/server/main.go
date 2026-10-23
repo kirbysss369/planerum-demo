@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -60,8 +61,23 @@ func run() error {
 		model = hours.DemoModel{}
 	} else {
 		allowed := strings.Split(os.Getenv("CLOUD_ALLOWED_MODEL_IDS"), ",")
+		baseURL := os.Getenv("CLOUD_BASE_URL")
+		if baseURL == "" {
+			baseURL = hours.CloudBaseURL
+		}
+		responseTokens := hours.DefaultCloudTokens
+		if baseURL == hours.GigaSchoolBaseURL {
+			responseTokens = hours.DefaultGigaSchoolTokens
+		}
+		if value := os.Getenv("CLOUD_MAX_RESPONSE_TOKENS"); value != "" {
+			var err error
+			responseTokens, err = strconv.Atoi(value)
+			if err != nil {
+				return fmt.Errorf("CLOUD_MAX_RESPONSE_TOKENS must be an integer: %w", err)
+			}
+		}
 		var err error
-		model, err = hours.NewCloudModel(os.Getenv("CLOUD_API_KEY"), os.Getenv("CLOUD_MODEL_ID"), allowed)
+		model, err = hours.NewCloudModelWithConfig(os.Getenv("CLOUD_API_KEY"), os.Getenv("CLOUD_MODEL_ID"), allowed, hours.CloudModelConfig{BaseURL: baseURL, ResponseTokens: responseTokens})
 		if err != nil {
 			return err
 		}
@@ -84,6 +100,7 @@ func run() error {
 		Exporter: hours.Exporter{Root: root, Python: python, Script: filepath.Join("office", "export.py")},
 		Token:    os.Getenv("SERVICE_TOKEN"),
 		Embed:    os.Getenv("EMBED_MODE") == "1",
+		Demo:     demo,
 	}
 	workerDone := make(chan struct{})
 	go func() {

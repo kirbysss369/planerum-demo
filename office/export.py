@@ -44,7 +44,7 @@ def set_document_metadata(properties, title, subject):
     properties.modified = timestamp
 
 
-def make_docx(program, output):
+def make_docx(program, output, coverage=None, regulatory=None):
     spec = program["spec"]
     doc = Document()
     set_document_metadata(doc.core_properties, spec["title"], "Образовательная программа")
@@ -71,18 +71,40 @@ def make_docx(program, output):
     doc.add_heading(spec["title"], 1)
     doc.add_paragraph(f"Аудитория: {spec['audience']}. Форма: {spec['delivery']}.")
     doc.add_paragraph(f"Объем: {fmt(spec['requested'])} академических часов.")
+    doc.add_paragraph(f"Входной уровень: {spec['entry_level']}.")
+    doc.add_paragraph(f"Итоговая аттестация: {spec['attestation']}.")
     doc.add_heading("1. Общая характеристика программы", 1)
+    if regulatory:
+        doc.add_heading("Нормативные основания подготовки", 2)
+        for basis in regulatory.get("basis", []):
+            doc.add_paragraph(f"{basis['title']} — {basis['scope']}. {basis['location']}")
+        doc.add_paragraph(regulatory["note"])
     doc.add_heading("1.1. Цель и результаты обучения", 2)
     doc.add_paragraph(program["goal"])
-    add_table(doc, ["ID", "Результат обучения", "Темы", "Оценочные средства"], [
-        [o["id"], o["text"], ", ".join(o.get("topic_ids", [])), ", ".join(o.get("assessment_ids", []))]
-        for o in program["outcomes"]
-    ])
+    if coverage is None:
+        add_table(doc, ["ID", "Результат обучения", "Темы", "Оценочные средства"], [
+            [o["id"], o["text"], ", ".join(o.get("topic_ids", [])), ", ".join(o.get("assessment_ids", []))]
+            for o in program["outcomes"]
+        ])
+    else:
+        def labels(items):
+            return "; ".join(f"{item['id']} — {item['text']}" for item in items) or "Не подготовлены"
+        add_table(doc, ["Компетенция", "Темы", "Тестовые вопросы", "Практические задания"], [
+            [f"{row['outcome_id']} — {row['outcome_text']}", labels(row["topics"]), labels(row["tests"]), labels(row["practice"])]
+            for row in coverage
+        ])
+    doc.add_paragraph("Проверка связей подтверждает структуру. Корректность содержания и соответствие заданий компетенциям проверяет методист.")
     for outcome in program["outcomes"]:
         doc.add_heading(f"Карта компетенции {outcome['id']}", 3)
         doc.add_paragraph("Знания: " + "; ".join(outcome.get("knowledge", [])))
         doc.add_paragraph("Умения: " + "; ".join(outcome.get("skills", [])))
         doc.add_paragraph("Навыки: " + "; ".join(outcome.get("experience", [])))
+        if outcome.get("standard_code"):
+            source = next((s for s in program.get("sources", []) if s["id"] == outcome.get("source_id")), None)
+            doc.add_paragraph("Код трудовой функции: " + outcome["standard_code"])
+            if source:
+                doc.add_paragraph(f"Основание: {source['title']} — {source['location']}")
+                doc.add_paragraph("Подтверждающий фрагмент: " + source.get("evidence", ""))
         doc.add_paragraph("Темы: " + ", ".join(outcome.get("topic_ids", [])))
         doc.add_paragraph("Оценочные средства: " + ", ".join(outcome.get("assessment_ids", [])))
     landscape = doc.add_section(WD_SECTION_START.NEW_PAGE)
@@ -112,6 +134,7 @@ def make_docx(program, output):
     portrait.orientation = WD_ORIENT.PORTRAIT
     portrait.page_width, portrait.page_height = Inches(8.27), Inches(11.69)
     doc.add_heading("4. Рабочие программы и оценка качества", 1)
+    lectures_by_topic = {lecture["topic_id"]: lecture for lecture in program.get("lectures", [])}
     for module in program["modules"]:
         doc.add_heading(module["title"], 2)
         for topic in module["topics"]:
@@ -121,6 +144,9 @@ def make_docx(program, output):
                 kind_names = {"lecture": "лекция", "practice": "практика", "laboratory": "лабораторная", "self_study": "самостоятельная работа"}
                 kind = kind_names.get(activity["kind"], activity["kind"])
                 doc.add_paragraph(f"{activity['name']} — {fmt(activity['hours'])} ч. ({kind}).")
+            if topic["id"] in lectures_by_topic:
+                doc.add_heading("План лекции", 3)
+                doc.add_paragraph(lectures_by_topic[topic["id"]]["plan"])
     for assessment in program.get("assessments", []):
         doc.add_heading(f"Оценочное средство {assessment['id']}", 3)
         doc.add_paragraph(assessment["question"])
@@ -144,11 +170,13 @@ def make_pptx(program, output):
     set_document_metadata(presentation.core_properties, program["spec"]["title"], "Лекционные материалы")
     presentation.slide_width = Inches(13.333)
     presentation.slide_height = Inches(7.5)
+    topic_titles = {topic["id"]: topic["title"] for module in program["modules"] for topic in module["topics"]}
     for lecture in program.get("lectures", []):
         slides = lecture.get("slides") or [lecture.get("plan", "")]
         for index, body in enumerate(slides, 1):
             slide = presentation.slides.add_slide(presentation.slide_layouts[1])
-            slide.shapes.title.text = f"{lecture['topic_id']} · {index}"
+            title = topic_titles.get(lecture["topic_id"], lecture["topic_id"])
+            slide.shapes.title.text = f"{title} · {index}"
             for paragraph in slide.shapes.title.text_frame.paragraphs:
                 paragraph.font.size = SlidePt(32)
                 paragraph.font.color.rgb = SlideRGBColor(23, 31, 45)
@@ -168,7 +196,9 @@ def main():
     program = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     out = Path(sys.argv[2])
     out.mkdir(parents=True, exist_ok=True)
-    make_docx(program, out / "program.docx")
+    report = out / "validation-report.json"
+    validation = json.loads(report.read_text(encoding="utf-8")) if report.exists() else {}
+    make_docx(program, out / "program.docx", validation.get("coverage"), validation.get("regulatory"))
     make_pptx(program, out / "lectures.pptx")
 
 

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Планерум API
-  version: 0.1.0
+  version: 0.3.0
   description: Контракт сервиса подготовки образовательных программ. Содержимое программы требует проверки методистом.
 servers:
   - url: http://127.0.0.1:8080
@@ -49,7 +49,11 @@ paths:
         '409':
           description: Устаревшая revision
         '422':
-          description: Действие недопустимо в текущем состоянии
+          description: Действие недопустимо или результат не прошёл проверку
+        '502':
+          description: Ошибка конфигурации или запроса к провайдеру модели
+        '503':
+          description: Временная недоступность модели после ограниченного повтора
   /v1/references:
     post:
       summary: Извлечь текст референса
@@ -118,12 +122,18 @@ components:
       properties:
         action:
           type: string
-          enum: [create, answer, status, approve_outline, generate, generate_async, job_status, revise, export]
+          enum: [intake, create, answer, adapt, bind_standard, status, approve_outline, generate, generate_async, job_status, revise, export]
+        message:
+          type: string
+          maxLength: 8000
+          description: Свободное описание или уточнение для intake/answer. Сбор условий сохраняет draft; create с подтверждённым spec запускается отдельно.
         program_id: {type: string}
         job_id: {type: string}
         revision: {type: integer, minimum: 0}
         spec:
           $ref: '#/components/schemas/ProgramSpec'
+        binding:
+          $ref: '#/components/schemas/StandardBinding'
         program:
           $ref: '#/components/schemas/Program'
     AgentResponse:
@@ -145,16 +155,51 @@ components:
           type: object
           additionalProperties: {type: string}
         error: {type: string}
+        coverage:
+          type: array
+          items:
+            $ref: '#/components/schemas/CoverageRow'
+        regulatory:
+          $ref: '#/components/schemas/RegulatoryReport'
+    CoverageRow:
+      type: object
+      description: Структурные связи компетенции; complete не подтверждает методическую корректность содержания.
+      properties:
+        outcome_id: {type: string}
+        outcome_text: {type: string}
+        complete: {type: boolean}
+        topics: {type: array, items: {$ref: '#/components/schemas/CoverageItem'}}
+        tests: {type: array, items: {$ref: '#/components/schemas/CoverageItem'}}
+        practice: {type: array, items: {$ref: '#/components/schemas/CoverageItem'}}
+    CoverageItem:
+      type: object
+      properties:
+        id: {type: string}
+        text: {type: string}
+    GenerationMetric:
+      type: object
+      properties:
+        stage: {type: string, enum: [intake, outline, materials]}
+        duration_ms: {type: integer, minimum: 0}
+        succeeded: {type: boolean}
+        calls:
+          type: array
+          items: {$ref: '#/components/schemas/ModelCall'}
+        usage:
+          type: object
+          properties:
+            prompt_tokens: {type: integer}
+            completion_tokens: {type: integer}
     ProgramSpec:
       type: object
-      description: Может быть неполным при create/answer; тогда сервис возвращает вопросы.
+      description: Может быть неполным; intake/answer сохраняют черновик и вопросы. create с program_id требует подтверждённого полного spec. Неизвестные kind и requested обозначаются пустой строкой и 0 в черновике.
       properties:
         title: {type: string}
-        kind: {type: string, enum: [qualification, general]}
+        kind: {type: string, enum: ["", qualification, general]}
         audience: {type: string}
         entry_level: {type: string}
         delivery: {type: string}
-        requested: {type: number, minimum: 16, maximum: 500}
+        requested: {type: number, description: Для каркаса 16–500; в черновике 0 означает неизвестный объём.}
         independent_internship: {type: boolean}
         attestation: {type: string}
         requirements: {type: string}
@@ -163,10 +208,31 @@ components:
       description: Полный объект совпадает с типом Program в program.go.
       required: [id, revision, outline_revision, approved_revision, state, spec, goal, outcomes, modules, final_attestation_hours, usage]
       properties:
+        origin:
+          type: object
+          properties:
+            program_id: {type: string}
+            revision: {type: integer}
         id: {type: string}
         revision: {type: integer}
         outline_revision: {type: integer}
         approved_revision: {type: integer}
+        dialogue:
+          type: array
+          maxItems: 40
+          items:
+            $ref: '#/components/schemas/DialogueMessage'
+        questions:
+          type: array
+          maxItems: 5
+          items: {type: string}
+        hours_rebalanced: {type: boolean}
+        generation_metrics:
+          type: array
+          description: Измеренные попытки, включая неуспешные; у старых программ история измерений может отсутствовать.
+          items:
+            $ref: '#/components/schemas/GenerationMetric'
+
         generated_from_revision:
           type: integer
           description: Версия, на основе которой успешно сохранён последний результат генерации. Используется для восстановления состояния задания после сбоя.
@@ -199,6 +265,12 @@ components:
           properties:
             prompt_tokens: {type: integer}
             completion_tokens: {type: integer}
+    DialogueMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role: {type: string, enum: [user, assistant]}
+        content: {type: string, maxLength: 8000}
     GenerationJob:
       type: object
       required: [id, program_id, expected_revision, state, attempts, updated_at]
@@ -226,3 +298,54 @@ components:
         severity: {type: string, enum: [error, warning]}
         path: {type: string}
         message: {type: string}
+
+    StandardBinding:
+      type: object
+      required: [outcome_id, code, title, location, evidence, confirmed]
+      additionalProperties: false
+      properties:
+        outcome_id: {type: string, maxLength: 64}
+        code: {type: string, maxLength: 64}
+        title: {type: string, maxLength: 150}
+        location: {type: string, maxLength: 250}
+        evidence: {type: string, maxLength: 4000}
+        confirmed: {type: boolean, description: Подтверждение проверки источника методистом.}
+    RegulatoryReport:
+      type: object
+      properties:
+        basis:
+          type: array
+          items:
+            type: object
+            properties:
+              title: {type: string}
+              location: {type: string}
+              scope: {type: string}
+        catalog_date: {type: string, format: date}
+        linked_outcomes: {type: integer}
+        confirmed_outcomes: {type: integer}
+        standard_required: {type: boolean}
+        review_required: {type: boolean}
+        note: {type: string}
+    ModelCall:
+      type: object
+      description: Конфигурация и хеши конкретного вызова; ключи и исходный текст запроса не дублируются в измерениях.
+      properties:
+        contract_version: {type: string}
+        temperature: {type: number}
+        mode: {type: string, enum: [real, demo, unknown]}
+        model_id: {type: string}
+        endpoint: {type: string}
+        response_tokens: {type: integer}
+        instruction_sha256: {type: string}
+        input_sha256: {type: string}
+        output_sha256: {type: string}
+        usage_unavailable: {type: boolean}
+        schema_sha256: {type: string}
+        duration_ms: {type: integer}
+        succeeded: {type: boolean}
+        usage:
+          type: object
+          properties:
+            prompt_tokens: {type: integer}
+            completion_tokens: {type: integer}

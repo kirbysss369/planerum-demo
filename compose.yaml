@@ -10,14 +10,17 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       PGSSLMODE: disable
       CLOUD_API_KEY: ${CLOUD_API_KEY:?Set CLOUD_API_KEY in .env}
+      CLOUD_BASE_URL: ${CLOUD_BASE_URL:-https://foundation-models.api.cloud.ru/v1}
       CLOUD_MODEL_ID: ${CLOUD_MODEL_ID:?Set CLOUD_MODEL_ID in .env}
       CLOUD_ALLOWED_MODEL_IDS: ${CLOUD_ALLOWED_MODEL_IDS:?Set CLOUD_ALLOWED_MODEL_IDS in .env}
+      CLOUD_MAX_RESPONSE_TOKENS: ${CLOUD_MAX_RESPONSE_TOKENS:-}
       SERVICE_TOKEN: ${SERVICE_TOKEN:?Set SERVICE_TOKEN in .env}
       ARTIFACT_ROOT: /app/data/artifacts
+      PORT: ${APP_PORT:-8080}
     volumes:
       - artifacts:/app/data/artifacts
     ports:
-      - "127.0.0.1:8080:8080"
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8080}:${APP_PORT:-8080}"
     depends_on:
       db:
         condition: service_healthy

@@ -4,34 +4,15 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"strings"
+	"time"
 )
 
 var ErrInvalidState = errors.New("action is not allowed in the current state")
+var ErrGenerationValidation = errors.New("Материалы не прошли проверку; исправьте отмеченные ошибки или повторите генерацию")
 
 type Service struct {
 	Store     Store
 	Generator Generator
-}
-
-func MissingQuestions(spec ProgramSpec) []string {
-	var questions []string
-	if spec.Kind != Qualification && spec.Kind != General {
-		questions = append(questions, "Какой тип программы нужен: повышение квалификации или общеразвивающая?")
-	}
-	if spec.Requested <= 0 {
-		questions = append(questions, "Какой объем программы в академических часах?")
-	}
-	if strings.TrimSpace(spec.Audience) == "" || strings.TrimSpace(spec.EntryLevel) == "" {
-		questions = append(questions, "Кто слушатели и каков их начальный уровень?")
-	}
-	if strings.TrimSpace(spec.Delivery) == "" {
-		questions = append(questions, "Какая форма обучения и проведения занятий?")
-	}
-	if strings.TrimSpace(spec.Attestation) == "" {
-		questions = append(questions, "Как пройдет итоговая аттестация?")
-	}
-	return questions
 }
 
 func (s Service) Create(ctx context.Context, spec ProgramSpec) (Program, []string, error) {
@@ -42,25 +23,14 @@ func (s Service) Create(ctx context.Context, spec ProgramSpec) (Program, []strin
 	if err := spec.Validate(); err != nil {
 		return Program{}, nil, err
 	}
-	outline, usage, err := s.Generator.Outline(ctx, spec)
-	if err != nil {
-		return Program{}, nil, err
-	}
-	p := Program{ID: newID(), Revision: 1, OutlineRevision: 1, State: OutlineReady, Spec: spec, Goal: outline.Goal, Outcomes: outline.Outcomes, Modules: outline.Modules, FinalAttestation: outline.FinalAttestation, Sources: outline.Sources, Usage: usage}
-	p.Issues = p.ValidateOutline()
-	if err := s.Store.Put(ctx, 0, p); err != nil {
-		return Program{}, nil, err
-	}
-	return p, nil, nil
+	p, err := s.prepareOutline(ctx, Program{ID: newID(), State: Draft, Spec: spec}, 0)
+	return p, nil, err
 }
 
 func (s Service) Approve(ctx context.Context, id string, expectedRevision int) (Program, error) {
-	p, err := s.Store.Get(ctx, id)
+	p, err := s.loadRevision(ctx, id, expectedRevision)
 	if err != nil {
 		return p, err
-	}
-	if p.Revision != expectedRevision {
-		return p, ErrConflict
 	}
 	if p.State != OutlineReady {
 		return p, ErrInvalidState
@@ -76,30 +46,25 @@ func (s Service) Approve(ctx context.Context, id string, expectedRevision int) (
 }
 
 func (s Service) Generate(ctx context.Context, id string, expectedRevision int) (Program, error) {
-	p, err := s.Store.Get(ctx, id)
+	p, err := s.generationInput(ctx, id, expectedRevision)
 	if err != nil {
 		return p, err
 	}
-	if p.Revision != expectedRevision {
-		return p, ErrConflict
-	}
-	if p.ApprovedRevision != p.OutlineRevision || (p.State != Approved && p.State != Ready) {
-		return p, ErrInvalidState
-	}
-	materials, usage, err := s.Generator.Materials(ctx, p)
+	started := time.Now()
+	generator, recorder := s.Generator.measured()
+	materials, usage, err := generator.Materials(ctx, p)
+	elapsed := time.Since(started)
 	if err != nil {
-		if usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
-			p.Usage.Add(usage)
-			p.Revision++
-			if saveErr := s.Store.Put(ctx, expectedRevision, p); saveErr != nil {
-				return p, saveErr
-			}
+		p.recordGeneration("materials", elapsed, usage, false, recorder.Calls...)
+		p.Revision++
+		if saveErr := s.persistGeneration(ctx, expectedRevision, p); saveErr != nil {
+			return p, saveErr
 		}
 		return p, err
 	}
 	p.Assessments = materials.Assessments
 	p.Lectures = materials.Lectures
-	p.Sources = append(p.Sources, materials.Sources...)
+	p.Sources = mergeSources(p.Sources, materials.Sources)
 	for i := range p.Outcomes {
 		p.Outcomes[i].AssessmentIDs = nil
 		for _, a := range p.Assessments {
@@ -111,29 +76,35 @@ func (s Service) Generate(ctx context.Context, id string, expectedRevision int) 
 			}
 		}
 	}
-	p.Usage.Add(usage)
 	p.GeneratedFromRevision = expectedRevision
 	p.Issues = p.ValidateComplete()
+	p.recordGeneration("materials", elapsed, usage, !hasErrors(p.Issues), recorder.Calls...)
 	p.Revision++
 	if hasErrors(p.Issues) {
 		p.State = Approved
 	} else {
 		p.State = Ready
 	}
-	return p, s.Store.Put(ctx, expectedRevision, p)
+	if saveErr := s.persistGeneration(ctx, expectedRevision, p); saveErr != nil {
+		return p, saveErr
+	}
+	if p.State != Ready {
+		return p, ErrGenerationValidation
+	}
+	return p, nil
 }
 
 // Revise replaces a proposed program revision with optimistic concurrency.
 // Structural changes invalidate outline approval; material edits keep it.
 func (s Service) Revise(ctx context.Context, id string, expectedRevision int, proposed Program) (Program, error) {
-	p, err := s.Store.Get(ctx, id)
+	p, err := s.loadRevision(ctx, id, expectedRevision)
 	if err != nil {
 		return p, err
 	}
-	if p.Revision != expectedRevision {
-		return p, ErrConflict
+	if p.State == Draft {
+		return p, ErrInvalidState
 	}
-	structural := !reflect.DeepEqual(p.Spec, proposed.Spec) || p.Goal != proposed.Goal || !sameOutlineOutcomes(p.Outcomes, proposed.Outcomes) || !reflect.DeepEqual(p.Modules, proposed.Modules) || p.FinalAttestation != proposed.FinalAttestation
+	structural := !reflect.DeepEqual(p.Spec, proposed.Spec) || p.Goal != proposed.Goal || !sameOutlineOutcomes(p.Outcomes, proposed.Outcomes) || !reflect.DeepEqual(p.Modules, proposed.Modules) || p.FinalAttestation != proposed.FinalAttestation || !reflect.DeepEqual(standardSources(p), standardSources(proposed))
 	p.Spec, p.Goal, p.Outcomes, p.Modules, p.FinalAttestation = proposed.Spec, proposed.Goal, proposed.Outcomes, proposed.Modules, proposed.FinalAttestation
 	p.Assessments, p.Lectures, p.Sources = proposed.Assessments, proposed.Lectures, proposed.Sources
 	p.Revision++
@@ -172,4 +143,16 @@ func sameOutlineOutcomes(a, b []Outcome) bool {
 		}
 	}
 	return true
+}
+
+// generationInput is shared by synchronous and queued generation.
+func (s Service) generationInput(ctx context.Context, id string, revision int) (Program, error) {
+	p, err := s.loadRevision(ctx, id, revision)
+	if err != nil {
+		return p, err
+	}
+	if p.ApprovedRevision != p.OutlineRevision || (p.State != Approved && p.State != Ready) {
+		return p, ErrInvalidState
+	}
+	return p, nil
 }

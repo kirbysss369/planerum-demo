@@ -10,7 +10,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -57,24 +56,42 @@ func (a App) extractReference(ctx context.Context, file multipart.File, header *
 	defer os.Remove(temp.Name())
 	defer temp.Close()
 	hash := sha256.New()
-	size, err := io.Copy(io.MultiWriter(temp, hash), io.LimitReader(file, 10<<20))
+	size, err := io.Copy(io.MultiWriter(temp, hash), io.LimitReader(file, (10<<20)+1))
 	if err != nil {
 		return ReferenceExtract{}, err
+	}
+	if size > 10<<20 {
+		return ReferenceExtract{}, errors.New("Файл превышает допустимый размер 10 МиБ")
 	}
 	python := a.Exporter.Python
 	if python == "" {
 		python = "python3"
 	}
-	command := exec.CommandContext(ctx, python, filepath.Join(filepath.Dir(a.Exporter.Script), "ingest.py"), temp.Name())
-	output, err := command.Output()
+	output, err := runProcess(ctx, 30*time.Second, 2<<20, 64<<10, python, filepath.Join(filepath.Dir(a.Exporter.Script), "ingest.py"), temp.Name())
 	if err != nil {
-		return ReferenceExtract{}, fmt.Errorf("reference extraction failed: %w", err)
+		if errors.Is(err, context.DeadlineExceeded) {
+			return ReferenceExtract{}, errors.New("Обработка файла заняла больше 30 секунд; загрузите документ меньшего размера")
+		}
+		return ReferenceExtract{}, errors.New("Не удалось обработать файл; проверьте формат и содержимое документа")
 	}
 	var result struct {
-		Text string `json:"text"`
+		Text      string `json:"text"`
+		ErrorCode string `json:"error_code"`
 	}
 	if err := json.Unmarshal(output, &result); err != nil {
 		return ReferenceExtract{}, err
+	}
+	if result.ErrorCode != "" {
+		message := "Не удалось прочитать документ; проверьте формат и содержимое"
+		switch result.ErrorCode {
+		case "unsafe_document":
+			message = "Файл отклонён: небезопасное или неподдерживаемое содержимое (макросы, вложения, активные действия или шифрование)"
+		case "reference_too_large":
+			message = "Документ превышает ограничения на объём или сложность содержимого"
+		case "no_text":
+			message = "В документе нет извлекаемого текста; для сканированного PDF сначала выполните распознавание"
+		}
+		return ReferenceExtract{}, errors.New(message)
 	}
 	if strings.TrimSpace(result.Text) == "" {
 		return ReferenceExtract{}, errors.New("no text found; scanned PDFs require text recognition before upload")

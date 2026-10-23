@@ -9,6 +9,12 @@ type DemoModel struct{}
 
 func (DemoModel) JSON(_ context.Context, _ string, input any, output any) (Usage, error) {
 	switch out := output.(type) {
+	case *ParsedSpec:
+		item, ok := input.(IntakeInput)
+		if !ok {
+			return Usage{}, errors.New("demo intake needs a spec and messages")
+		}
+		*out = ParsedSpec{Spec: demoInterpret(item)}
 	case *GeneratedOutline:
 		spec, ok := input.(ProgramSpec)
 		if !ok {

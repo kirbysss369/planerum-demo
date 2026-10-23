@@ -8,9 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
+	"time"
 )
 
 type Exporter struct {
@@ -88,9 +88,11 @@ func (e Exporter) Export(ctx context.Context, p Program) (map[string]string, err
 	if python == "" {
 		python = "python3"
 	}
-	command := exec.CommandContext(ctx, python, e.Script, jsonPath, dir)
-	if output, err := command.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("office export: %w: %s", err, output)
+	if _, err := runProcess(ctx, 2*time.Minute, 64<<10, 64<<10, python, e.Script, jsonPath, dir); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, errors.New("Сборка файлов заняла больше двух минут; сохранённая программа доступна для повторной выгрузки")
+		}
+		return nil, fmt.Errorf("Не удалось собрать файлы; программа сохранена: %w", err)
 	}
 	if !completeExport(dir) {
 		return nil, errors.New("office export returned an incomplete bundle")
